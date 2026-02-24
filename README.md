@@ -149,6 +149,19 @@ Add or merge these **two parts** into your config (other options have defaults).
 }
 ```
 
+**(Optional) Set a vision fallback model** — used only when the main model is text-only and can't process images natively. Vision-capable models (Claude, GPT-4V, Gemini, LLaVA, …) receive images inline and never call `vision_model`:
+```json
+{
+  "agents": {
+    "defaults": {
+      "model": "deepseek/deepseek-chat",
+      "visionModel": "openai/gpt-4o-mini"
+    }
+  }
+}
+```
+Transcriptions are cached on disk (SHA-256 keyed) — the same image is never processed twice.
+
 **3. Chat**
 
 ```bash
@@ -841,6 +854,36 @@ nanobot cron list
 # Remove a job
 nanobot cron remove <job_id>
 ```
+
+**Named agent profiles** — run a cron job under a specific agent persona:
+
+```bash
+# Add a named profile to ~/.nanobot/config.json
+# "agents": {
+#   "profiles": {
+#     "trader": {
+#       "systemPrompt": "You are a trading analyst. Be concise and data-driven.",
+#       "model": "anthropic/claude-opus-4-5"   ← optional, overrides default
+#     },
+#     "assistant": {
+#       "systemPrompt": "You are a personal assistant. Be friendly and brief."
+#     }
+#   }
+# }
+
+# Then attach a profile to any cron job with --agent
+nanobot cron add --name "morning-brief" \
+  --message "Analyze BTC/ETH and send a market summary" \
+  --cron "0 8 * * *" \
+  --agent trader
+
+nanobot cron add --name "reminder" \
+  --message "Check my task list and remind me of anything due today" \
+  --every 3600 \
+  --agent assistant
+```
+
+Each job runs with the matching profile's `systemPrompt` prepended — giving different jobs distinct personalities or instructions without touching the default agent config.
 
 </details>
 
