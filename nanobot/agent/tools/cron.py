@@ -65,6 +65,10 @@ class CronTool(Tool):
                 "deliver": {
                     "type": "boolean",
                     "description": "If true, automatically send the agent's response to the user after every run. Use for reminder-type jobs where notification is the whole point. For monitoring/recurring tasks where you should only report important findings, omit this and use the message tool explicitly when something is worth reporting."
+                },
+                "agent": {
+                    "type": "string",
+                    "description": "Named agent profile from config (agents.profiles). The profile's system_prompt is prepended to the system prompt when this job runs, and its model (if set) overrides the default."
                 }
             },
             "required": ["action"]
@@ -80,10 +84,11 @@ class CronTool(Tool):
         at: str | None = None,
         job_id: str | None = None,
         deliver: bool = False,
+        agent: str | None = None,
         **kwargs: Any
     ) -> str:
         if action == "add":
-            return self._add_job(message, every_seconds, cron_expr, tz, at, deliver)
+            return self._add_job(message, every_seconds, cron_expr, tz, at, deliver, agent)
         elif action == "list":
             return self._list_jobs()
         elif action == "remove":
@@ -98,6 +103,7 @@ class CronTool(Tool):
         tz: str | None,
         at: str | None,
         deliver: bool = False,
+        agent: str | None = None,
     ) -> str:
         if not message:
             return "Error: message is required for add"
@@ -135,8 +141,10 @@ class CronTool(Tool):
             channel=self._channel,
             to=self._chat_id,
             delete_after_run=delete_after,
+            agent=agent,
         )
-        return f"Created job '{job.name}' (id: {job.id})"
+        agent_info = f" [profile: {agent}]" if agent else ""
+        return f"Created job '{job.name}' (id: {job.id}){agent_info}"
     
     def _list_jobs(self) -> str:
         jobs = self._cron.list_jobs()

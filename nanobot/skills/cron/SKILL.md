@@ -35,6 +35,11 @@ Timezone-aware cron:
 cron(action="add", message="Morning standup", cron_expr="0 9 * * 1-5", tz="America/Vancouver")
 ```
 
+With named agent profile:
+```
+cron(action="add", message="Analyze trading risk", cron_expr="0 9 * * *", tz="Europe/Kyiv", agent="gerchik-trader")
+```
+
 List/remove:
 ```
 cron(action="list")
