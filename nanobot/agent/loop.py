@@ -396,6 +396,53 @@ class AgentLoop:
                 message_tool.start_turn()
 
         history = session.get_history(max_messages=self.memory_window)
+        # ── Vision preprocessing ──────────────────────────────────────────────
+        # When vision_model is configured and the message contains fresh images:
+        #   1. Call vision_model with history context to get rich descriptions
+        #   2. Store descriptions in MediaCache (never re-process same image)
+        #   3. Delete the raw file from disk
+        #   4. Main agent loop runs on text descriptions only (cheaper + faster)
+        # Already-cached images are substituted as text directly (no LLM call).
+        if msg.media and self.vision_model:
+            uncached = []
+            for path in msg.media:
+                fhash = self.context.media_cache.hash_file(path)
+                if fhash and not self.context.media_cache.get(fhash):
+                    uncached.append(path)
+
+            if uncached:
+                # Build focused message list for vision preprocessor
+                vision_msgs = self.context.build_vision_messages(
+                    history=history,
+                    current_message=msg.content,
+                    media=uncached,
+                    context_window=6,
+                )
+                try:
+                    vision_resp = await self.provider.chat(
+                        messages=vision_msgs,
+                        tools=[],
+                        model=self.vision_model,
+                        temperature=0.1,
+                        max_tokens=2048,
+                    )
+                    description = vision_resp.content or ""
+                    # Store one shared description for all images in this batch
+                    for path in uncached:
+                        fhash = self.context.media_cache.hash_file(path)
+                        if fhash:
+                            self.context.media_cache.put(fhash, description, path)
+                    logger.info("Vision preprocessor: transcribed {} image(s) with {}", len(uncached), self.vision_model)
+                except Exception as e:
+                    logger.warning("Vision preprocessor failed ({}), falling back to inline base64", e)
+
+        # Delete raw media files — descriptions are now in MediaCache
+        for media_path in (msg.media or []):
+            try:
+                Path(media_path).unlink(missing_ok=True)
+            except OSError:
+                pass
+
         initial_messages = self.context.build_messages(
             history=history,
             current_message=msg.content,
@@ -403,14 +450,6 @@ class AgentLoop:
             channel=msg.channel, chat_id=msg.chat_id,
             system_prompt_prefix=system_prompt,
         )
-
-        # Media files have been encoded to base64 by build_messages;
-        # delete them from disk so ~/.nanobot/media/ doesn't grow unbounded.
-        for media_path in (msg.media or []):
-            try:
-                Path(media_path).unlink(missing_ok=True)
-            except OSError:
-                pass
 
         async def _bus_progress(content: str, *, tool_hint: bool = False) -> None:
             meta = dict(msg.metadata or {})
@@ -420,10 +459,9 @@ class AgentLoop:
                 channel=msg.channel, chat_id=msg.chat_id, content=content, metadata=meta,
             ))
 
-        # Use vision_model when message contains media (images/files) and vision_model is configured
-        effective_model = self.vision_model if msg.media and self.vision_model else None
+        # Main agent always uses the default model — vision descriptions are now text
         final_content, _, all_msgs = await self._run_agent_loop(
-            initial_messages, on_progress=on_progress or _bus_progress, model=effective_model,
+            initial_messages, on_progress=on_progress or _bus_progress,
         )
 
         if final_content is None:
