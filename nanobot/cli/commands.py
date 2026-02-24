@@ -334,11 +334,22 @@ def gateway(
                 system_prompt = profile.system_prompt
                 profile_model = profile.model or None
             else:
-                logger.warning(
-                    "Cron job '{}': agent profile '{}' not found in config, using default.",
-                    job.name,
-                    job.payload.agent,
-                )
+                # Named profile not found → try the special "default" profile as fallback
+                default_profile = config.agents.profiles.get("default")
+                if default_profile:
+                    system_prompt = default_profile.system_prompt
+                    profile_model = default_profile.model or None
+                    logger.warning(
+                        "Cron job '{}': agent profile '{}' not found, falling back to 'default' profile.",
+                        job.name,
+                        job.payload.agent,
+                    )
+                else:
+                    logger.warning(
+                        "Cron job '{}': agent profile '{}' not found in config, using agent defaults.",
+                        job.name,
+                        job.payload.agent,
+                    )
 
         response = await agent.process_direct(
             job.payload.message,
