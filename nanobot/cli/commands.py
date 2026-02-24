@@ -324,11 +324,28 @@ def gateway(
     # Set cron callback (needs agent)
     async def on_cron_job(job: CronJob) -> str | None:
         """Execute a cron job through the agent."""
+        # Resolve named agent profile → system_prompt override
+        system_prompt: str | None = None
+        if job.payload.agent:
+            profile = config.agents.profiles.get(job.payload.agent)
+            if profile:
+                system_prompt = profile.system_prompt
+                # Override model if the profile specifies one
+                if profile.model:
+                    agent.model = profile.model
+            else:
+                logger.warning(
+                    "Cron job '{}': agent profile '{}' not found in config, using default.",
+                    job.name,
+                    job.payload.agent,
+                )
+
         response = await agent.process_direct(
             job.payload.message,
             session_key=f"cron:{job.id}",
             channel=job.payload.channel or "cli",
             chat_id=job.payload.to or "direct",
+            system_prompt=system_prompt,
         )
         if job.payload.deliver and job.payload.to:
             from nanobot.bus.events import OutboundMessage
@@ -812,9 +829,10 @@ def cron_list(
     table.add_column("ID", style="cyan")
     table.add_column("Name")
     table.add_column("Schedule")
+    table.add_column("Agent", style="magenta")
     table.add_column("Status")
     table.add_column("Next Run")
-    
+
     import time
     from datetime import datetime as _dt
     from zoneinfo import ZoneInfo
@@ -826,7 +844,7 @@ def cron_list(
             sched = f"{job.schedule.expr or ''} ({job.schedule.tz})" if job.schedule.tz else (job.schedule.expr or "")
         else:
             sched = "one-time"
-        
+
         # Format next run
         next_run = ""
         if job.state.next_run_at_ms:
@@ -836,10 +854,11 @@ def cron_list(
                 next_run = _dt.fromtimestamp(ts, tz).strftime("%Y-%m-%d %H:%M")
             except Exception:
                 next_run = time.strftime("%Y-%m-%d %H:%M", time.localtime(ts))
-        
+
         status = "[green]enabled[/green]" if job.enabled else "[dim]disabled[/dim]"
-        
-        table.add_row(job.id, job.name, sched, status, next_run)
+        agent_name = job.payload.agent or "[dim]default[/dim]"
+
+        table.add_row(job.id, job.name, sched, agent_name, status, next_run)
     
     console.print(table)
 
@@ -855,15 +874,35 @@ def cron_add(
     deliver: bool = typer.Option(False, "--deliver", "-d", help="Deliver response to channel"),
     to: str = typer.Option(None, "--to", help="Recipient for delivery"),
     channel: str = typer.Option(None, "--channel", help="Channel for delivery (e.g. 'telegram', 'whatsapp')"),
+    agent: str = typer.Option(
+        None,
+        "--agent",
+        "-a",
+        help=(
+            "Named agent profile from config (agents.profiles). "
+            "The profile's systemPrompt is prepended to the default system prompt "
+            "when this job runs."
+        ),
+    ),
 ):
     """Add a scheduled job."""
-    from nanobot.config.loader import get_data_dir
+    from nanobot.config.loader import get_data_dir, load_config
     from nanobot.cron.service import CronService
     from nanobot.cron.types import CronSchedule
-    
+
     if tz and not cron_expr:
         console.print("[red]Error: --tz can only be used with --cron[/red]")
         raise typer.Exit(1)
+
+    # Validate --agent against config profiles
+    if agent:
+        config = load_config()
+        if agent not in config.agents.profiles:
+            available = list(config.agents.profiles.keys())
+            hint = f"  Available: {available}" if available else "  No profiles defined yet."
+            console.print(f"[red]Error: agent profile '{agent}' not found in config (agents.profiles).[/red]")
+            console.print(hint)
+            raise typer.Exit(1)
 
     # Determine schedule type
     if every:
@@ -877,10 +916,10 @@ def cron_add(
     else:
         console.print("[red]Error: Must specify --every, --cron, or --at[/red]")
         raise typer.Exit(1)
-    
+
     store_path = get_data_dir() / "cron" / "jobs.json"
     service = CronService(store_path)
-    
+
     try:
         job = service.add_job(
             name=name,
@@ -889,12 +928,14 @@ def cron_add(
             deliver=deliver,
             to=to,
             channel=channel,
+            agent=agent,
         )
     except ValueError as e:
         console.print(f"[red]Error: {e}[/red]")
         raise typer.Exit(1) from e
 
-    console.print(f"[green]✓[/green] Added job '{job.name}' ({job.id})")
+    agent_hint = f" [dim](agent: {agent})[/dim]" if agent else ""
+    console.print(f"[green]✓[/green] Added job '{job.name}' ({job.id}){agent_hint}")
 
 
 @cron_app.command("remove")
@@ -940,13 +981,13 @@ def cron_run(
     force: bool = typer.Option(False, "--force", "-f", help="Run even if disabled"),
 ):
     """Manually run a job."""
-    from loguru import logger
+    from loguru import logger as _logger
     from nanobot.config.loader import load_config, get_data_dir
     from nanobot.cron.service import CronService
     from nanobot.cron.types import CronJob
     from nanobot.bus.queue import MessageBus
     from nanobot.agent.loop import AgentLoop
-    logger.disable("nanobot")
+    _logger.disable("nanobot")
 
     config = load_config()
     provider = _make_provider(config)
@@ -973,11 +1014,17 @@ def cron_run(
     result_holder = []
 
     async def on_job(job: CronJob) -> str | None:
+        system_prompt: str | None = None
+        if job.payload.agent:
+            profile = config.agents.profiles.get(job.payload.agent)
+            if profile:
+                system_prompt = profile.system_prompt
         response = await agent_loop.process_direct(
             job.payload.message,
             session_key=f"cron:{job.id}",
             channel=job.payload.channel or "cli",
             chat_id=job.payload.to or "direct",
+            system_prompt=system_prompt,
         )
         result_holder.append(response)
         return response

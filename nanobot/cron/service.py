@@ -100,6 +100,7 @@ class CronService:
                             deliver=j["payload"].get("deliver", False),
                             channel=j["payload"].get("channel"),
                             to=j["payload"].get("to"),
+                            agent=j["payload"].get("agent"),
                         ),
                         state=CronJobState(
                             next_run_at_ms=j.get("state", {}).get("nextRunAtMs"),
@@ -147,6 +148,7 @@ class CronService:
                         "deliver": j.payload.deliver,
                         "channel": j.payload.channel,
                         "to": j.payload.to,
+                        "agent": j.payload.agent,
                     },
                     "state": {
                         "nextRunAtMs": j.state.next_run_at_ms,
@@ -282,13 +284,20 @@ class CronService:
         deliver: bool = False,
         channel: str | None = None,
         to: str | None = None,
+        agent: str | None = None,
         delete_after_run: bool = False,
     ) -> CronJob:
-        """Add a new job."""
+        """Add a new job.
+
+        Args:
+            agent: Optional name of an agent profile defined in
+                ``config.agents.profiles``.  When set, the job runs under that
+                profile's ``system_prompt`` (and optionally ``model``).
+        """
         store = self._load_store()
         _validate_schedule_for_add(schedule)
         now = _now_ms()
-        
+
         job = CronJob(
             id=str(uuid.uuid4())[:8],
             name=name,
@@ -300,6 +309,7 @@ class CronService:
                 deliver=deliver,
                 channel=channel,
                 to=to,
+                agent=agent,
             ),
             state=CronJobState(next_run_at_ms=_compute_next_run(schedule, now)),
             created_at_ms=now,

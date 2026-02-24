@@ -192,10 +192,36 @@ class AgentDefaults(Base):
     memory_window: int = 100
 
 
+class AgentProfile(Base):
+    """Named agent profile with a custom system prompt and optional model override.
+
+    Used with ``nanobot cron add --agent <name>`` to run a specific cron job
+    under a different identity or set of instructions than the global default.
+
+    Example ``~/.nanobot/config.json``::
+
+        {
+          "agents": {
+            "profiles": {
+              "gerchik-trader": {
+                "systemPrompt": "You are a Gerchik strategy trader...",
+                "model": "google/gemini-2.0-flash-001"
+              }
+            }
+          }
+        }
+    """
+
+    system_prompt: str
+    model: str | None = None
+
+
 class AgentsConfig(Base):
     """Agent configuration."""
 
     defaults: AgentDefaults = Field(default_factory=AgentDefaults)
+    profiles: dict[str, AgentProfile] = Field(default_factory=dict)
+    """Named agent profiles used by ``nanobot cron add --agent <name>``."""
 
 
 class ProviderConfig(Base):

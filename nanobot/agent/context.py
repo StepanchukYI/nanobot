@@ -141,6 +141,7 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
         media: list[str] | None = None,
         channel: str | None = None,
         chat_id: str | None = None,
+        system_prompt_prefix: str | None = None,
     ) -> list[dict[str, Any]]:
         """
         Build the complete message list for an LLM call.
@@ -152,6 +153,8 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
             media: Optional list of local file paths for images/media.
             channel: Current channel (telegram, feishu, etc.).
             chat_id: Current chat/user ID.
+            system_prompt_prefix: Optional text prepended to the system prompt
+                (e.g. from a named agent profile set via ``cron add --agent``).
 
         Returns:
             List of messages including system prompt.
@@ -160,6 +163,8 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
 
         # System prompt
         system_prompt = self.build_system_prompt(skill_names)
+        if system_prompt_prefix:
+            system_prompt = system_prompt_prefix + "\n\n" + system_prompt
         messages.append({"role": "system", "content": system_prompt})
 
         # History

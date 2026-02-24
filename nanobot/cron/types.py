@@ -27,6 +27,8 @@ class CronPayload:
     deliver: bool = False
     channel: str | None = None  # e.g. "whatsapp"
     to: str | None = None  # e.g. phone number
+    # Named agent profile from config agents.profiles (optional)
+    agent: str | None = None
 
 
 @dataclass
