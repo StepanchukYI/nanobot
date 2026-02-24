@@ -404,6 +404,14 @@ class AgentLoop:
             system_prompt_prefix=system_prompt,
         )
 
+        # Media files have been encoded to base64 by build_messages;
+        # delete them from disk so ~/.nanobot/media/ doesn't grow unbounded.
+        for media_path in (msg.media or []):
+            try:
+                Path(media_path).unlink(missing_ok=True)
+            except OSError:
+                pass
+
         async def _bus_progress(content: str, *, tool_hint: bool = False) -> None:
             meta = dict(msg.metadata or {})
             meta["_progress"] = True
