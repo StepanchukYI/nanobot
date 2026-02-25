@@ -191,8 +191,8 @@ class SubagentManager:
                 else:
                     final_result = response.content
                     break
-            
-            if final_result is None:
+
+            if not final_result:
                 final_result = "Task completed but no final response was generated."
             
             logger.info("Subagent [{}] completed successfully", task_id)

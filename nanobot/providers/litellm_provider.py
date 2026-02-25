@@ -7,6 +7,7 @@ from typing import Any
 
 import litellm
 from litellm import acompletion
+from loguru import logger
 
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 from nanobot.providers.registry import find_by_model, find_gateway
@@ -224,6 +225,20 @@ class LiteLLMProvider(LLMProvider):
         try:
             response = await acompletion(**kwargs)
             return self._parse_response(response)
+        except litellm.InternalServerError as e:
+            # Some providers (e.g. ZhipuAI/GLM) return finish_reason='abort'
+            # when the safety filter rejects a response.  LiteLLM does not
+            # recognise 'abort' and raises InternalServerError wrapping a
+            # pydantic ValidationError.  Treat it as an empty safe-stop so the
+            # agent loop can handle it gracefully instead of showing a traceback.
+            err_str = str(e)
+            if "abort" in err_str:
+                logger.warning("Provider returned finish_reason='abort' (safety filter); treating as empty stop.")
+                return LLMResponse(content="", finish_reason="stop")
+            return LLMResponse(
+                content=f"Error calling LLM: {err_str}",
+                finish_reason="error",
+            )
         except Exception as e:
             # Return error as content for graceful handling
             return LLMResponse(
