@@ -286,6 +286,8 @@ def gateway(
     from nanobot.cron.service import CronService
     from nanobot.cron.types import CronJob
     from nanobot.heartbeat.service import HeartbeatService
+    from nanobot.event.service import EventService
+    from nanobot.config.schema import EventEndpointConfig
     
     if verbose:
         import logging
@@ -393,35 +395,62 @@ def gateway(
         interval_s=hb_cfg.interval_s,
         enabled=hb_cfg.enabled,
     )
-    
+
+    # Create event webhook service
+    ev_cfg = config.gateway.events
+    event_svc = EventService(ev_cfg, host=config.gateway.host, port=port)
+
+    async def on_event_trigger(name: str, endpoint: EventEndpointConfig) -> str | None:
+        """Execute an event endpoint through the agent."""
+        response = await agent.process_direct(
+            endpoint.message,
+            session_key=f"event:{name}",
+            channel=endpoint.channel or "cli",
+            chat_id=endpoint.to or "direct",
+        )
+        if endpoint.deliver and endpoint.to:
+            from nanobot.bus.events import OutboundMessage
+            await bus.publish_outbound(OutboundMessage(
+                channel=endpoint.channel or "cli",
+                chat_id=endpoint.to,
+                content=response or "",
+            ))
+        return response
+
+    event_svc.on_event = on_event_trigger
+
     if channels.enabled_channels:
         console.print(f"[green]✓[/green] Channels enabled: {', '.join(channels.enabled_channels)}")
     else:
         console.print("[yellow]Warning: No channels enabled[/yellow]")
-    
+
     cron_status = cron.status()
     if cron_status["jobs"] > 0:
         console.print(f"[green]✓[/green] Cron: {cron_status['jobs']} scheduled jobs")
-    
+
     console.print(f"[green]✓[/green] Heartbeat: every {hb_cfg.interval_s}s")
-    
+
+    if ev_cfg.enabled and ev_cfg.endpoints:
+        console.print(f"[green]✓[/green] Events: {len(ev_cfg.endpoints)} endpoints on port {port}")
+
     async def run():
         try:
             await cron.start()
             await heartbeat.start()
-            await asyncio.gather(
-                agent.run(),
-                channels.start_all(),
-            )
+            tasks = [agent.run(), channels.start_all()]
+            if ev_cfg.enabled and ev_cfg.endpoints:
+                tasks.append(event_svc.start())
+            await asyncio.gather(*tasks)
         except KeyboardInterrupt:
             console.print("\nShutting down...")
         finally:
             await agent.close_mcp()
             heartbeat.stop()
             cron.stop()
+            event_svc.stop()
             agent.stop()
             await channels.stop_all()
-    
+
     asyncio.run(run())
 
 
