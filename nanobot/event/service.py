@@ -16,7 +16,7 @@ class EventService:
         self.config = config
         self.host = host
         self.port = port
-        self.on_event: Callable[[str, EventEndpointConfig], Awaitable[str | None]] | None = None
+        self.on_event: Callable[[str, EventEndpointConfig, str], Awaitable[str | None]] | None = None
         self._server: asyncio.Server | None = None
         self._running = False
 
@@ -142,16 +142,17 @@ class EventService:
             return
 
         # Fire callback
+        payload = body.decode("utf-8", errors="replace").strip()
         logger.info("EventService: firing event '{}'", event_name)
         if self.on_event:
-            asyncio.create_task(self._fire(event_name, endpoint))
+            asyncio.create_task(self._fire(event_name, endpoint, payload))
 
         self._send_response(writer, 200, {"status": "ok", "event": event_name})
 
-    async def _fire(self, name: str, endpoint: EventEndpointConfig) -> None:
+    async def _fire(self, name: str, endpoint: EventEndpointConfig, payload: str) -> None:
         try:
             if self.on_event:
-                await self.on_event(name, endpoint)
+                await self.on_event(name, endpoint, payload)
         except Exception as exc:
             logger.error("EventService: event '{}' handler error: {}", name, exc)
 

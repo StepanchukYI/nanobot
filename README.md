@@ -975,6 +975,71 @@ The agent can also manage this file itself — ask it to "add a periodic task" a
 
 </details>
 
+<details>
+<summary><b>Event Webhooks (HTTP Triggers)</b></summary>
+
+External systems (CI/CD pipelines, scripts, monitoring) can trigger agent tasks via HTTP POST to the gateway.
+
+**Configuration** in `config.json`:
+
+```json
+{
+  "gateway": {
+    "events": {
+      "enabled": true,
+      "secret": "my-webhook-secret",
+      "endpoints": {
+        "deploy": {
+          "message": "New deploy happened.",
+          "channel": "telegram",
+          "to": "123456789",
+          "deliver": true
+        }
+      }
+    }
+  }
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `secret` | Optional Bearer token for authentication. Set to `null` to disable auth. |
+| `endpoints` | Map of event names to endpoint configs. Each name becomes `/event/{name}`. |
+| `message` | Task message sent to the agent when the event fires. |
+| `channel` / `to` | Where to deliver the agent's response (optional). |
+| `deliver` | Whether to push the response back to the channel (default `false`). |
+
+**Usage:**
+
+```bash
+# Trigger with authentication and JSON payload
+curl -X POST http://localhost:18790/event/deploy \
+  -H "Authorization: Bearer my-webhook-secret" \
+  -H "Content-Type: application/json" \
+  -d '{"version": "2.0", "branch": "main", "commit": "abc123"}'
+
+# Trigger without payload
+curl -X POST http://localhost:18790/event/deploy \
+  -H "Authorization: Bearer my-webhook-secret"
+
+# If secret is null, no Authorization header needed
+curl -X POST http://localhost:18790/event/deploy \
+  -d '{"note": "no auth required"}'
+```
+
+When a payload is included, the agent receives the message with the payload appended:
+
+```
+New deploy happened.
+
+Webhook payload:
+{"version": "2.0", "branch": "main", "commit": "abc123"}
+```
+
+**Security:** Use a strong `secret` value and bind the gateway to `127.0.0.1` (default) if only local services need access. For external access, put a reverse proxy in front.
+
+</details>
+
 ## 🐳 Docker
 
 > [!TIP]

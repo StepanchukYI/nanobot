@@ -472,10 +472,13 @@ def gateway(
     ev_cfg = config.gateway.events
     event_svc = EventService(ev_cfg, host=config.gateway.host, port=port)
 
-    async def on_event_trigger(name: str, endpoint: EventEndpointConfig) -> str | None:
+    async def on_event_trigger(name: str, endpoint: EventEndpointConfig, payload: str) -> str | None:
         """Execute an event endpoint through the agent."""
+        message = endpoint.message
+        if payload:
+            message = f"{endpoint.message}\n\nWebhook payload:\n{payload}"
         response = await agent.process_direct(
-            endpoint.message,
+            message,
             session_key=f"event:{name}",
             channel=endpoint.channel or "cli",
             chat_id=endpoint.to or "direct",
