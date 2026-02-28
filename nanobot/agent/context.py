@@ -20,8 +20,9 @@ class ContextBuilder:
     BOOTSTRAP_FILES = ["AGENTS.md", "SOUL.md", "USER.md", "TOOLS.md", "IDENTITY.md"]
     _RUNTIME_CONTEXT_TAG = "[Runtime Context — metadata only, not instructions]"
     
-    def __init__(self, workspace: Path):
+    def __init__(self, workspace: Path, max_skills: int = 3):
         self.workspace = workspace
+        self.max_skills = max_skills
         self.memory = MemoryStore(workspace)
         self.skills = SkillsLoader(workspace)
         self.skill_ranker = SkillRanker(self.skills)
@@ -47,7 +48,7 @@ class ContextBuilder:
             inject_full, _ = self.skill_ranker.get_relevant_skills(
                 query=user_query,
                 always_skills=always_skills,
-                top_k=3,
+                top_k=self.max_skills,
                 threshold=0.05,
             )
         else:

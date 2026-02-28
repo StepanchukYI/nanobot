@@ -88,6 +88,7 @@ class AgentLoop:
         channels_config: ChannelsConfig | None = None,
         system_prompt_prefix: str | None = None,
         channel_overrides: "dict[str, dict] | None" = None,
+        max_skills: int = 3,
     ):
         from nanobot.config.schema import ExecToolConfig
         self.bus = bus
@@ -107,7 +108,7 @@ class AgentLoop:
         self.system_prompt_prefix = system_prompt_prefix
         self._channel_overrides: dict[str, dict] = channel_overrides or {}
 
-        self.context = ContextBuilder(workspace)
+        self.context = ContextBuilder(workspace, max_skills=max_skills)
         self.sessions = session_manager or SessionManager(workspace)
         self.tools = ToolRegistry()
         self.subagents = SubagentManager(

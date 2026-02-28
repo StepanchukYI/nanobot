@@ -237,6 +237,7 @@ class AgentDefaults(Base):
     temperature: float = 0.1
     max_tool_iterations: int = 40
     memory_window: int = 100
+    max_skills: int = 3
 
 
 class AgentProfile(Base):
@@ -270,6 +271,7 @@ class AgentProfile(Base):
     temperature: float | None = None
     max_tool_iterations: int | None = None
     memory_window: int | None = None
+    max_skills: int | None = None
     provider: str | None = None  # Explicit provider name; None = auto-detect
 
 

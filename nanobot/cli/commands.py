@@ -351,6 +351,7 @@ def gateway(
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
         channel_overrides=channel_overrides,
+        max_skills=config.agents.defaults.max_skills,
     )
     
     # Set cron callback (needs agent)
@@ -582,6 +583,7 @@ def agent(
     profile_temperature: float | None = None
     profile_max_tokens: int | None = None
     profile_memory_window: int | None = None
+    profile_max_skills: int | None = None
 
     if agent_profile:
         profile = config.agents.profiles.get(agent_profile)
@@ -598,6 +600,7 @@ def agent(
             profile_temperature = profile.temperature
             profile_max_tokens = profile.max_tokens
             profile_memory_window = profile.memory_window
+            profile_max_skills = profile.max_skills
 
     if profile_model and (profile_model != config.agents.defaults.model or (profile and profile.provider)):
         try:
@@ -623,8 +626,9 @@ def agent(
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
         system_prompt_prefix=system_prompt,
+        max_skills=profile_max_skills if profile_max_skills is not None else config.agents.defaults.max_skills,
     )
-    
+
     # Show spinner when logs are off (no output to miss); skip when logs are on
     def _thinking_ctx():
         if logs:
@@ -1142,6 +1146,7 @@ def cron_run(
         restrict_to_workspace=config.tools.restrict_to_workspace,
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
+        max_skills=config.agents.defaults.max_skills,
     )
 
     store_path = get_data_dir() / "cron" / "jobs.json"
