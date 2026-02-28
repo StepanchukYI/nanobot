@@ -165,12 +165,12 @@ class AgentLoop:
             await self._mcp_stack.__aenter__()
             await connect_mcp_servers(self._mcp_servers, self.tools, self._mcp_stack)
             self._mcp_connected = True
-        except BaseException as e:
+        except (Exception, BaseExceptionGroup) as e:
             logger.error("Failed to connect MCP servers (will retry next message): {}", e)
             if self._mcp_stack:
                 try:
                     await self._mcp_stack.aclose()
-                except BaseException:
+                except (Exception, BaseExceptionGroup):
                     pass
                 self._mcp_stack = None
         finally:
