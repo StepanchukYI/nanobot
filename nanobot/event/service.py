@@ -143,7 +143,7 @@ class EventService:
 
         # Fire callback
         payload = body.decode("utf-8", errors="replace").strip()
-        logger.info("EventService: firing event '{}'", event_name)
+        logger.info("EventService: firing event '{}' (payload: {} bytes)", event_name, len(payload))
         if self.on_event:
             asyncio.create_task(self._fire(event_name, endpoint, payload))
 

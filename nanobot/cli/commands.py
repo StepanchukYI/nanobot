@@ -477,6 +477,7 @@ def gateway(
         message = endpoint.message
         if payload:
             message = f"{endpoint.message}\n\nWebhook payload:\n{payload}"
+        logger.info("Event '{}': sending message to agent ({} chars, payload {} chars)", name, len(message), len(payload))
         response = await agent.process_direct(
             message,
             session_key=f"event:{name}",
