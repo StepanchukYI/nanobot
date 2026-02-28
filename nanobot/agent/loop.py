@@ -9,6 +9,7 @@ from contextlib import AsyncExitStack
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
+import litellm
 from loguru import logger
 
 from nanobot.agent.context import ContextBuilder
@@ -131,6 +132,7 @@ class AgentLoop:
         self._consolidation_locks: dict[str, asyncio.Lock] = {}
         self._active_tasks: dict[str, list[asyncio.Task]] = {}  # session_key -> tasks
         self._processing_lock = asyncio.Lock()
+        self._new_failed_sessions: set[str] = set()  # Sessions where /new consolidation failed
         self._register_default_tools()
 
     def _register_default_tools(self) -> None:
@@ -218,16 +220,35 @@ class AgentLoop:
         effective_temperature = temperature if temperature is not None else self.temperature
         effective_max_tokens = max_tokens if max_tokens is not None else self.max_tokens
 
+        _context_retried = False
+
         while iteration < effective_max_iter:
             iteration += 1
 
-            response = await effective_provider.chat(
-                messages=messages,
-                tools=self.tools.get_definitions(),
-                model=effective_model,
-                temperature=effective_temperature,
-                max_tokens=effective_max_tokens,
-            )
+            try:
+                response = await effective_provider.chat(
+                    messages=messages,
+                    tools=self.tools.get_definitions(),
+                    model=effective_model,
+                    temperature=effective_temperature,
+                    max_tokens=effective_max_tokens,
+                )
+            except litellm.ContextWindowExceededError:
+                if _context_retried:
+                    logger.error("Context window exceeded even after trimming")
+                    final_content = (
+                        "This conversation is too long for the model's context window. "
+                        "Please start a new session with /new."
+                    )
+                    break
+                _context_retried = True
+                logger.warning("Context window exceeded — trimming to ~50% and retrying")
+                # Keep system prompt (first message) + recent ~50% of history
+                if len(messages) > 2:
+                    half = max(1, len(messages) // 2)
+                    trimmed = [messages[0]] + messages[half:]
+                    messages = [messages[0]] + Session._trim_to_coherent_history(trimmed[1:])
+                continue
 
             if response.has_tool_calls:
                 if on_progress:
@@ -402,6 +423,15 @@ class AgentLoop:
         # Slash commands
         cmd = msg.content.strip().lower()
         if cmd == "/new":
+            # If consolidation already failed for this session, force-clear without saving
+            if session.key in self._new_failed_sessions:
+                self._new_failed_sessions.discard(session.key)
+                session.clear()
+                self.sessions.save(session)
+                self.sessions.invalidate(session.key)
+                return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
+                                      content="New session started (memory not saved).")
+
             lock = self._consolidation_locks.setdefault(session.key, asyncio.Lock())
             self._consolidating.add(session.key)
             try:
@@ -411,15 +441,17 @@ class AgentLoop:
                         temp = Session(key=session.key)
                         temp.messages = list(snapshot)
                         if not await self._consolidate_memory(temp, archive_all=True):
+                            self._new_failed_sessions.add(session.key)
                             return OutboundMessage(
                                 channel=msg.channel, chat_id=msg.chat_id,
-                                content="Memory archival failed, session not cleared. Please try again.",
+                                content="Memory archival failed. Send /new again to force-clear without saving memory.",
                             )
             except Exception:
                 logger.exception("/new archival failed for {}", session.key)
+                self._new_failed_sessions.add(session.key)
                 return OutboundMessage(
                     channel=msg.channel, chat_id=msg.chat_id,
-                    content="Memory archival failed, session not cleared. Please try again.",
+                    content="Memory archival failed. Send /new again to force-clear without saving memory.",
                 )
             finally:
                 self._consolidating.discard(session.key)

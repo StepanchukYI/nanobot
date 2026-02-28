@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import litellm
 from loguru import logger
 
 from nanobot.utils.helpers import ensure_dir
@@ -96,10 +97,20 @@ class MemoryStore:
 
         lines = []
         for m in old_messages:
-            if not m.get("content"):
+            raw = m.get("content")
+            if not raw:
                 continue
+            # Truncate long content to keep consolidation prompt within context
+            if isinstance(raw, list):
+                # Multipart content (e.g. vision) — extract text parts
+                text_parts = [p.get("text", "") for p in raw if isinstance(p, dict) and p.get("type") == "text"]
+                content_str = " ".join(text_parts)
+            else:
+                content_str = str(raw)
+            if len(content_str) > 500:
+                content_str = content_str[:500] + "…"
             tools = f" [tools: {', '.join(m['tools_used'])}]" if m.get("tools_used") else ""
-            lines.append(f"[{m.get('timestamp', '?')[:16]}] {m['role'].upper()}{tools}: {m['content']}")
+            lines.append(f"[{m.get('timestamp', '?')[:16]}] {m['role'].upper()}{tools}: {content_str}")
 
         current_memory = self.read_long_term()
         prompt = f"""Process this conversation and call the save_memory tool with your consolidation.
@@ -110,11 +121,18 @@ class MemoryStore:
 ## Conversation to Process
 {chr(10).join(lines)}"""
 
-        try:
+        async def _try_consolidate(consolidation_lines: list[str]) -> bool:
+            p = f"""Process this conversation and call the save_memory tool with your consolidation.
+
+## Current Long-term Memory
+{current_memory or "(empty)"}
+
+## Conversation to Process
+{chr(10).join(consolidation_lines)}"""
             response = await provider.chat(
                 messages=[
                     {"role": "system", "content": "You are a memory consolidation agent. Call the save_memory tool with your consolidation of the conversation."},
-                    {"role": "user", "content": prompt},
+                    {"role": "user", "content": p},
                 ],
                 tools=_SAVE_MEMORY_TOOL,
                 model=model,
@@ -125,7 +143,6 @@ class MemoryStore:
                 return False
 
             args = response.tool_calls[0].arguments
-            # Some providers return arguments as a JSON string instead of dict
             if isinstance(args, str):
                 args = json.loads(args)
             if not isinstance(args, dict):
@@ -141,10 +158,26 @@ class MemoryStore:
                     update = json.dumps(update, ensure_ascii=False)
                 if update != current_memory:
                     self.write_long_term(update)
+            return True
 
+        try:
+            if not await _try_consolidate(lines):
+                return False
             session.last_consolidated = 0 if archive_all else len(session.messages) - keep_count
             logger.info("Memory consolidation done: {} messages, last_consolidated={}", len(session.messages), session.last_consolidated)
             return True
+        except litellm.ContextWindowExceededError:
+            # Retry with only the last 20% of lines
+            reduced = lines[-(max(1, len(lines) // 5)):]
+            logger.warning("Consolidation exceeded context window, retrying with {} of {} lines", len(reduced), len(lines))
+            try:
+                await _try_consolidate(reduced)
+                session.last_consolidated = 0 if archive_all else len(session.messages) - keep_count
+                logger.info("Memory consolidation done (reduced): last_consolidated={}", session.last_consolidated)
+                return True
+            except Exception:
+                logger.exception("Memory consolidation failed even with reduced lines")
+                return False
         except Exception:
             logger.exception("Memory consolidation failed")
             return False

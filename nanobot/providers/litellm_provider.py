@@ -254,6 +254,8 @@ class LiteLLMProvider(LLMProvider):
                     await asyncio.sleep(delay)
                     continue
                 return LLMResponse(content=f"Error calling LLM: {str(e)}", finish_reason="error")
+            except litellm.ContextWindowExceededError:
+                raise
             except Exception as e:
                 # Non-retryable (auth errors, bad requests, etc.)
                 return LLMResponse(content=f"Error calling LLM: {str(e)}", finish_reason="error")
