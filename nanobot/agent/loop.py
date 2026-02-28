@@ -396,6 +396,7 @@ class AgentLoop:
         memory_window: int | None = None,
     ) -> OutboundMessage | None:
         """Process a single inbound message and return the response."""
+        await self._connect_mcp()
         # System messages: parse origin from chat_id ("channel:chat_id")
         if msg.channel == "system":
             channel, chat_id = (msg.chat_id.split(":", 1) if ":" in msg.chat_id
