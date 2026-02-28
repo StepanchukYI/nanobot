@@ -199,19 +199,27 @@ def onboard():
 
 
 
-def _make_provider_for_model(config: Config, model: str):
+def _make_provider_for_model(config: Config, model: str, provider_name: str | None = None):
     """Create a provider for a specific model (used for agent profile overrides)."""
     from nanobot.providers.litellm_provider import LiteLLMProvider
     from nanobot.providers.registry import find_by_name
 
-    provider_name = config.get_provider_name(model)
-    p = config.get_provider(model)
-    if not p or not p.api_key:
-        raise ValueError(f"no API key configured for model '{model}' (provider: {provider_name})")
-    spec = find_by_name(provider_name) if provider_name else None
+    if provider_name:
+        p = getattr(config.providers, provider_name, None)
+        if not p or not p.api_key:
+            raise ValueError(f"no API key for provider '{provider_name}'")
+        spec = find_by_name(provider_name)
+        api_base = p.api_base or (spec.default_api_base if spec else None) or None
+    else:
+        provider_name = config.get_provider_name(model)
+        p = config.get_provider(model)
+        if not p or not p.api_key:
+            raise ValueError(f"no API key configured for model '{model}' (provider: {provider_name})")
+        spec = find_by_name(provider_name) if provider_name else None
+        api_base = config.get_api_base(model)
     return LiteLLMProvider(
         api_key=p.api_key,
-        api_base=config.get_api_base(model),
+        api_base=api_base,
         default_model=model,
         extra_headers=p.extra_headers if p else None,
         provider_name=provider_name,
@@ -307,9 +315,9 @@ def gateway(
             continue
         ch_model = profile.model or None
         ch_provider = None
-        if ch_model and ch_model != config.agents.defaults.model:
+        if ch_model and (ch_model != config.agents.defaults.model or profile.provider):
             try:
-                ch_provider = _make_provider_for_model(config, ch_model)
+                ch_provider = _make_provider_for_model(config, ch_model, provider_name=profile.provider)
             except Exception as e:
                 logger.warning("Channel '{}': cannot build provider for '{}': {}. Using default.", ch_name, ch_model, e)
                 ch_model = None
@@ -381,9 +389,9 @@ def gateway(
         # If the profile model belongs to a different provider, build a temp provider
         # for this call only — never mutate the shared agent state.
         profile_provider = None
-        if profile_model and profile_model != config.agents.defaults.model:
+        if profile_model and (profile_model != config.agents.defaults.model or profile.provider):
             try:
-                profile_provider = _make_provider_for_model(config, profile_model)
+                profile_provider = _make_provider_for_model(config, profile_model, provider_name=profile.provider)
             except Exception as e:
                 logger.warning(
                     "Cron job '{}': cannot build provider for model '{}': {}. Using default.",
@@ -591,9 +599,9 @@ def agent(
             profile_max_tokens = profile.max_tokens
             profile_memory_window = profile.memory_window
 
-    if profile_model and profile_model != config.agents.defaults.model:
+    if profile_model and (profile_model != config.agents.defaults.model or (profile and profile.provider)):
         try:
-            profile_provider = _make_provider_for_model(config, profile_model)
+            profile_provider = _make_provider_for_model(config, profile_model, provider_name=profile.provider if profile else None)
         except Exception as e:
             console.print(f"[yellow]Cannot build provider for model '{profile_model}': {e}. Using default.[/yellow]")
             profile_model = None
@@ -1172,9 +1180,9 @@ def cron_run(
                 profile_memory_window = profile.memory_window
 
         profile_provider = None
-        if profile_model and profile_model != config.agents.defaults.model:
+        if profile_model and (profile_model != config.agents.defaults.model or (profile and profile.provider)):
             try:
-                profile_provider = _make_provider_for_model(config, profile_model)
+                profile_provider = _make_provider_for_model(config, profile_model, provider_name=profile.provider if profile else None)
             except Exception as e:
                 _logger.warning(
                     "cron run: cannot build provider for model '{}': {}. Using default.",

@@ -270,6 +270,7 @@ class AgentProfile(Base):
     temperature: float | None = None
     max_tool_iterations: int | None = None
     memory_window: int | None = None
+    provider: str | None = None  # Explicit provider name; None = auto-detect
 
 
 class AgentsConfig(Base):
