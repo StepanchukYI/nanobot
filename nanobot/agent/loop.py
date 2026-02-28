@@ -154,6 +154,8 @@ class AgentLoop:
         if self.cron_service:
             self.tools.register(CronTool(self.cron_service))
 
+    _MCP_CONNECT_TIMEOUT = 30  # seconds
+
     async def _connect_mcp(self) -> None:
         """Connect to configured MCP servers (one-time, lazy)."""
         if self._mcp_connected or self._mcp_connecting or not self._mcp_servers:
@@ -163,8 +165,19 @@ class AgentLoop:
         try:
             self._mcp_stack = AsyncExitStack()
             await self._mcp_stack.__aenter__()
-            await connect_mcp_servers(self._mcp_servers, self.tools, self._mcp_stack)
+            await asyncio.wait_for(
+                connect_mcp_servers(self._mcp_servers, self.tools, self._mcp_stack),
+                timeout=self._MCP_CONNECT_TIMEOUT,
+            )
             self._mcp_connected = True
+        except asyncio.TimeoutError:
+            logger.error("MCP connection timed out after {}s (will retry next message)", self._MCP_CONNECT_TIMEOUT)
+            if self._mcp_stack:
+                try:
+                    await self._mcp_stack.aclose()
+                except (Exception, BaseExceptionGroup):
+                    pass
+                self._mcp_stack = None
         except (Exception, BaseExceptionGroup) as e:
             logger.error("Failed to connect MCP servers (will retry next message): {}", e)
             if self._mcp_stack:
