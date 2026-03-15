@@ -86,6 +86,7 @@ class AgentLoop:
         session_manager: SessionManager | None = None,
         mcp_servers: dict | None = None,
         channels_config: ChannelsConfig | None = None,
+        system_prompt_prefix: str | None = None,
     ):
         from nanobot.config.schema import ExecToolConfig, WebSearchConfig
 
@@ -95,6 +96,7 @@ class AgentLoop:
         self.workspace = workspace
         self.model = model or provider.get_default_model()
         self.vision_model = vision_model or ""
+        self.system_prompt_prefix = system_prompt_prefix
         self.max_iterations = max_iterations
         self.context_window_tokens = context_window_tokens
         self.web_search_config = web_search_config or WebSearchConfig()
@@ -384,6 +386,7 @@ class AgentLoop:
             messages = self.context.build_messages(
                 history=history,
                 current_message=msg.content, channel=channel, chat_id=chat_id,
+                system_prompt_prefix=self.system_prompt_prefix,
             )
             final_content, _, all_msgs = await self._run_agent_loop(messages)
             self._save_turn(session, all_msgs, 1 + len(history))
@@ -500,6 +503,7 @@ class AgentLoop:
             current_message=msg.content,
             media=msg.media if msg.media else None,
             channel=msg.channel, chat_id=msg.chat_id,
+            system_prompt_prefix=self.system_prompt_prefix,
         )
 
         # Delete raw media files -- descriptions are now embedded in initial_messages
@@ -580,9 +584,16 @@ class AgentLoop:
         channel: str = "cli",
         chat_id: str = "direct",
         on_progress: Callable[[str], Awaitable[None]] | None = None,
+        model: str | None = None,
     ) -> str:
         """Process a message directly (for CLI or cron usage)."""
         await self._connect_mcp()
-        msg = InboundMessage(channel=channel, sender_id="user", chat_id=chat_id, content=content)
-        response = await self._process_message(msg, session_key=session_key, on_progress=on_progress)
-        return response.content if response else ""
+        saved_model = self.model
+        if model:
+            self.model = model
+        try:
+            msg = InboundMessage(channel=channel, sender_id="user", chat_id=chat_id, content=content)
+            response = await self._process_message(msg, session_key=session_key, on_progress=on_progress)
+            return response.content if response else ""
+        finally:
+            self.model = saved_model
