@@ -26,9 +26,12 @@ class ContextBuilder:
         self.skills = SkillsLoader(workspace)
         self.media_cache = MediaCache(workspace)
 
-    def build_system_prompt(self, skill_names: list[str] | None = None) -> str:
+    def build_system_prompt(self, skill_names: list[str] | None = None, system_prompt_prefix: str | None = None) -> str:
         """Build the system prompt from identity, bootstrap files, memory, and skills."""
         parts = [self._get_identity()]
+
+        if system_prompt_prefix:
+            parts.append(f"# Agent Profile\n\n{system_prompt_prefix}")
 
         bootstrap = self._load_bootstrap_files()
         if bootstrap:
@@ -128,6 +131,7 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
         media: list[str] | None = None,
         channel: str | None = None,
         chat_id: str | None = None,
+        system_prompt_prefix: str | None = None,
     ) -> list[dict[str, Any]]:
         """Build the complete message list for an LLM call."""
         runtime_ctx = self._build_runtime_context(channel, chat_id)
@@ -141,7 +145,7 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
             merged = [{"type": "text", "text": runtime_ctx}] + user_content
 
         return [
-            {"role": "system", "content": self.build_system_prompt(skill_names)},
+            {"role": "system", "content": self.build_system_prompt(skill_names, system_prompt_prefix=system_prompt_prefix)},
             *history,
             {"role": "user", "content": merged},
         ]
