@@ -425,6 +425,10 @@ def gateway(
     cron_store_path = get_cron_dir() / "jobs.json"
     cron = CronService(cron_store_path)
 
+    # Load custom commands
+    from nanobot.agent.commands import CommandsManager
+    commands_mgr = CommandsManager(config.workspace_path)
+
     # Create agent with cron service
     agent = AgentLoop(
         bus=bus,
@@ -441,6 +445,7 @@ def gateway(
         session_manager=session_manager,
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
+        commands_manager=commands_mgr,
     )
 
     # Set cron callback (needs agent)
@@ -491,6 +496,11 @@ def gateway(
 
     # Create channel manager
     channels = ChannelManager(config, bus)
+
+    # Register custom commands in Telegram bot menu
+    tg_channel = channels.channels.get("telegram")
+    if tg_channel and hasattr(tg_channel, "set_custom_commands"):
+        tg_channel.set_custom_commands(commands_mgr.list_for_menu())
 
     def _pick_heartbeat_target() -> tuple[str, str]:
         """Pick a routable channel/chat target for heartbeat-triggered messages."""
@@ -618,6 +628,9 @@ def agent(
     else:
         logger.disable("nanobot")
 
+    from nanobot.agent.commands import CommandsManager
+    cli_commands_mgr = CommandsManager(config.workspace_path)
+
     agent_loop = AgentLoop(
         bus=bus,
         provider=provider,
@@ -632,6 +645,7 @@ def agent(
         restrict_to_workspace=config.tools.restrict_to_workspace,
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
+        commands_manager=cli_commands_mgr,
     )
 
     # Show spinner when logs are off (no output to miss); skip when logs are on

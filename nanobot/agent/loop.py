@@ -13,9 +13,11 @@ from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
 from loguru import logger
 
+from nanobot.agent.commands import CommandsManager
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.memory import MemoryConsolidator
 from nanobot.agent.subagent import SubagentManager
+from nanobot.agent.tools.command import CommandTool
 from nanobot.agent.tools.cron import CronTool
 from nanobot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
 from nanobot.agent.tools.message import MessageTool
@@ -63,11 +65,13 @@ class AgentLoop:
         session_manager: SessionManager | None = None,
         mcp_servers: dict | None = None,
         channels_config: ChannelsConfig | None = None,
+        commands_manager: CommandsManager | None = None,
     ):
         from nanobot.config.schema import ExecToolConfig, WebSearchConfig
 
         self.bus = bus
         self.channels_config = channels_config
+        self._commands = commands_manager or CommandsManager(workspace)
         self.provider = provider
         self.workspace = workspace
         self.model = model or provider.get_default_model()
@@ -128,6 +132,7 @@ class AgentLoop:
         self.tools.register(SpawnTool(manager=self.subagents))
         if self.cron_service:
             self.tools.register(CronTool(self.cron_service))
+        self.tools.register(CommandTool(self._commands))
 
     async def _connect_mcp(self) -> None:
         """Connect to configured MCP servers (one-time, lazy)."""
@@ -150,6 +155,75 @@ class AgentLoop:
                 self._mcp_stack = None
         finally:
             self._mcp_connecting = False
+
+    async def _run_script(self, cmd: dict, args: str) -> dict:
+        """Execute a command script and parse its output.
+
+        Returns dict with 'text' and 'media' keys.
+        """
+        script_path = self.workspace / cmd["script"]
+        if not script_path.exists():
+            return {"text": f"Error: script not found: {cmd['script']}", "media": []}
+
+        shell_cmd = f"python3 {script_path}"
+        if args:
+            shell_cmd += f" {args}"
+
+        try:
+            proc = await asyncio.create_subprocess_shell(
+                shell_cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=str(self.workspace),
+            )
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=60)
+        except asyncio.TimeoutError:
+            return {"text": "Error: script timed out (60s)", "media": []}
+        except Exception as e:
+            return {"text": f"Error running script: {e}", "media": []}
+
+        if stderr:
+            logger.warning("Command script stderr: {}", stderr.decode(errors="replace"))
+
+        raw = stdout.decode(errors="replace").strip()
+        if not raw:
+            return {"text": "Script produced no output.", "media": []}
+
+        # Try JSON format first
+        try:
+            data = json.loads(raw)
+            if isinstance(data, dict) and ("text" in data or "media" in data):
+                return {
+                    "text": data.get("text", ""),
+                    "media": data.get("media", []),
+                }
+        except (json.JSONDecodeError, ValueError):
+            pass
+
+        # Plain text: lines that are existing file paths → media, rest → text
+        text_lines = []
+        media = []
+        for line in raw.splitlines():
+            line = line.strip()
+            if line and os.path.isfile(line):
+                media.append(line)
+            elif line:
+                text_lines.append(line)
+        return {"text": "\n".join(text_lines), "media": media}
+
+    async def _exec_script_command(
+        self, cmd: dict, args: str, msg: InboundMessage,
+    ) -> OutboundMessage:
+        """Execute a script-mode command and return the result directly."""
+        result = await self._run_script(cmd, args)
+        content = result["text"] or cmd.get("description", "Done")
+        return OutboundMessage(
+            channel=msg.channel,
+            chat_id=msg.chat_id,
+            content=content,
+            media=result["media"],
+            metadata={"message_id": msg.metadata.get("message_id")},
+        )
 
     def _set_tool_context(self, channel: str, chat_id: str, message_id: str | None = None) -> None:
         """Update context for all tools that need routing info."""
@@ -405,9 +479,40 @@ class AgentLoop:
                 "/restart — Restart the bot",
                 "/help — Show available commands",
             ]
+            for cname, cdef in self._commands.list_commands().items():
+                lines.append(f"/{cname} — {cdef.get('description', '')}")
             return OutboundMessage(
                 channel=msg.channel, chat_id=msg.chat_id, content="\n".join(lines),
             )
+
+        # Custom commands
+        if msg.content.strip().startswith("/"):
+            parts = msg.content.strip().split(maxsplit=1)
+            cmd_name = parts[0][1:].lower()
+            cmd_args = parts[1] if len(parts) > 1 else ""
+            custom_cmd = self._commands.get(cmd_name)
+            if custom_cmd:
+                mode = custom_cmd.get("mode", "agent")
+
+                if mode == "script":
+                    return await self._exec_script_command(custom_cmd, cmd_args, msg)
+
+                elif mode == "agent":
+                    prompt = custom_cmd.get("prompt", "")
+                    if cmd_args:
+                        prompt += f"\n\nUser arguments: {cmd_args}"
+                    from dataclasses import replace as dc_replace
+                    msg = dc_replace(msg, content=prompt)
+
+                elif mode == "mixed":
+                    script_result = await self._run_script(custom_cmd, cmd_args)
+                    prompt = custom_cmd.get("prompt", "Process this output:")
+                    prompt += f"\n\nScript output:\n{script_result['text']}"
+                    if cmd_args:
+                        prompt += f"\n\nUser arguments: {cmd_args}"
+                    from dataclasses import replace as dc_replace
+                    msg = dc_replace(msg, content=prompt, media=script_result["media"])
+
         await self.memory_consolidator.maybe_consolidate_by_tokens(session)
 
         self._set_tool_context(msg.channel, msg.chat_id, msg.metadata.get("message_id"))

@@ -189,6 +189,7 @@ class TelegramChannel(BaseChannel):
             config = TelegramConfig.model_validate(config)
         super().__init__(config, bus)
         self.config: TelegramConfig = config
+        self._bot_commands = list(self.BOT_COMMANDS)
         self._app: Application | None = None
         self._chat_ids: dict[str, int] = {}  # Map sender_id to chat_id for replies
         self._typing_tasks: dict[str, asyncio.Task] = {}  # chat_id -> typing loop task
@@ -197,6 +198,18 @@ class TelegramChannel(BaseChannel):
         self._message_threads: dict[tuple[str, int], int] = {}
         self._bot_user_id: int | None = None
         self._bot_username: str | None = None
+
+    def set_custom_commands(self, commands: list[dict[str, str]]) -> None:
+        """Add custom commands to the Telegram bot menu.
+
+        Args:
+            commands: list of {"name": "camera", "description": "Take snapshots"}
+        """
+        for cmd in commands:
+            name = cmd.get("name", "")
+            desc = cmd.get("description", "")
+            if name:
+                self._bot_commands.append(BotCommand(name, desc or name))
 
     def is_allowed(self, sender_id: str) -> bool:
         """Preserve Telegram's legacy id|username allowlist matching."""
@@ -266,7 +279,7 @@ class TelegramChannel(BaseChannel):
         logger.info("Telegram bot @{} connected", bot_info.username)
 
         try:
-            await self._app.bot.set_my_commands(self.BOT_COMMANDS)
+            await self._app.bot.set_my_commands(self._bot_commands)
             logger.debug("Telegram bot commands registered")
         except Exception as e:
             logger.warning("Failed to register bot commands: {}", e)
