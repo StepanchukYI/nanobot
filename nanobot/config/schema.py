@@ -14,6 +14,12 @@ class Base(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
 
+class SessionConfig(Base):
+    """Named session definition."""
+
+    default: bool = False  # If true, this session is used by all channels/cron without explicit sessionKey
+
+
 class ChannelsConfig(Base):
     """Configuration for chat channels.
 
@@ -166,11 +172,20 @@ class ToolsConfig(Base):
 class Config(BaseSettings):
     """Root configuration for nanobot."""
 
+    sessions: dict[str, SessionConfig] = Field(default_factory=dict)
     agents: AgentsConfig = Field(default_factory=AgentsConfig)
     channels: ChannelsConfig = Field(default_factory=ChannelsConfig)
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
+
+    @property
+    def default_session_key(self) -> str | None:
+        """Return the name of the default session, if one is configured."""
+        for name, sess in self.sessions.items():
+            if sess.default:
+                return name
+        return None
 
     @property
     def workspace_path(self) -> Path:

@@ -438,6 +438,11 @@ class AgentLoop:
         await self.memory_consolidator.maybe_consolidate_by_tokens(session)
 
         self._set_tool_context(msg.channel, msg.chat_id, msg.metadata.get("message_id"))
+        # Propagate shared session key to CronTool so new cron jobs inherit it
+        from nanobot.agent.tools.cron import CronTool
+        cron_tool = self.tools.get("cron")
+        if isinstance(cron_tool, CronTool):
+            cron_tool.set_session_key(session_key or msg.session_key_override)
         if message_tool := self.tools.get("message"):
             if isinstance(message_tool, MessageTool):
                 message_tool.start_turn()

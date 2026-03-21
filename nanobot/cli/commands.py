@@ -476,7 +476,7 @@ def gateway(
         try:
             response = await agent.process_direct(
                 reminder_note,
-                session_key=f"cron:{job.id}",
+                session_key=job.payload.session_key or config.default_session_key or f"cron:{job.id}",
                 channel=job.payload.channel or "cli",
                 chat_id=job.payload.to or "direct",
                 model=cron_model,
