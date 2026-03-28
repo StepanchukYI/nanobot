@@ -54,15 +54,10 @@ class AgentDefaults(Base):
     timezone: str = "UTC"  # IANA timezone, e.g. "Asia/Shanghai", "America/New_York"
     vision_model: str = ""  # Optional vision-capable model used when images are attached
 
-
-class AgentProfile(Base):
-    """Named agent profile with optional overrides."""
-
-    system_prompt: str = ""  # Custom system prompt prefix
-    model: str | None = None  # Override default model
-    provider: str | None = None  # Explicit provider name; None = auto-detect
-    temperature: float | None = None
-    max_tokens: int | None = None
+    @property
+    def should_warn_deprecated_memory_window(self) -> bool:
+        """Return True when old memoryWindow is present without contextWindowTokens."""
+        return self.memory_window is not None and "context_window_tokens" not in self.model_fields_set
 
 
 class AgentProfile(Base):
