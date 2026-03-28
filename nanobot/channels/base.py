@@ -35,6 +35,7 @@ class BaseChannel(ABC):
         self.config = config
         self.bus = bus
         self._running = False
+        self._session_key: str | None = None
 
     async def transcribe_audio(self, file_path: str | Path) -> str:
         """Transcribe an audio file via Groq Whisper. Returns empty string on failure."""
@@ -161,7 +162,7 @@ class BaseChannel(ABC):
             content=content,
             media=media or [],
             metadata=meta,
-            session_key_override=session_key,
+            session_key_override=session_key or self._session_key,
         )
 
         await self.bus.publish_inbound(msg)

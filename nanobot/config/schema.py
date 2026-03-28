@@ -13,6 +13,14 @@ class Base(BaseModel):
 
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
+
+
+class SessionConfig(Base):
+    """Named session definition."""
+
+    default: bool = False  # If true, this session is used by all channels/cron without explicit sessionKey
+
+
 class ChannelsConfig(Base):
     """Configuration for chat channels.
 
@@ -40,8 +48,21 @@ class AgentDefaults(Base):
     context_window_tokens: int = 65_536
     temperature: float = 0.1
     max_tool_iterations: int = 40
+    # Deprecated compatibility field: accepted from old configs but ignored at runtime.
+    memory_window: int | None = Field(default=None, exclude=True)
     reasoning_effort: str | None = None  # low / medium / high - enables LLM thinking mode
     timezone: str = "UTC"  # IANA timezone, e.g. "Asia/Shanghai", "America/New_York"
+    vision_model: str = ""  # Optional vision-capable model used when images are attached
+
+
+class AgentProfile(Base):
+    """Named agent profile with optional overrides."""
+
+    system_prompt: str = ""  # Custom system prompt prefix
+    model: str | None = None  # Override default model
+    provider: str | None = None  # Explicit provider name; None = auto-detect
+    temperature: float | None = None
+    max_tokens: int | None = None
 
 
 class AgentProfile(Base):
@@ -164,11 +185,20 @@ class ToolsConfig(Base):
 class Config(BaseSettings):
     """Root configuration for nanobot."""
 
+    sessions: dict[str, SessionConfig] = Field(default_factory=dict)
     agents: AgentsConfig = Field(default_factory=AgentsConfig)
     channels: ChannelsConfig = Field(default_factory=ChannelsConfig)
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
+
+    @property
+    def default_session_key(self) -> str | None:
+        """Return the name of the default session, if one is configured."""
+        for name, sess in self.sessions.items():
+            if sess.default:
+                return name
+        return None
 
     @property
     def workspace_path(self) -> Path:
